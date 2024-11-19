@@ -1,0 +1,2 @@
+check:
+    cargo clippy --all -- -W clippy::all -W clippy::pedantic
