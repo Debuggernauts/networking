@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
+    is_enquiry: bool,
     total_packets: u16,
     ecc: Vec<u8> // 4 bytes to safe 2 bytes
 }
@@ -24,19 +25,19 @@ pub struct TransmissionHeader {
 #[derive(Debug, Clone)]
 pub struct Transmission {
     header: TransmissionHeader,
-    packets: Vec<Packet>,
+    pub packets: Vec<Packet>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PacketHeader {
     size: u16,
-    id: u16,
+    pub id: u16,
     ecc_size: u8,
 }
 
 #[derive(Debug, Clone)]
 pub struct Packet {
-    header: PacketHeader,
+    pub header: PacketHeader,
     data: Vec<u8>,
     ecc: Vec<u8>,
 }
@@ -107,7 +108,7 @@ impl Packet {
         let mut binary: Vec<(u8, bool)> = Vec::new();
         binary.append(&mut self.header.to_binary());
         binary.append(&mut self.data.iter().map(|byte| (*byte, false)).collect());
-        binary.append(&mut self.ecc.iter().map(|byte| (*byte, false)).collect()); // TODO CANT EXTEND
+        binary.append(&mut self.ecc.iter().map(|byte| (*byte, false)).collect());
         binary
     }
 
@@ -117,9 +118,10 @@ impl Packet {
 }
 
 impl TransmissionHeader {
-    pub fn new(size: u16) -> Self {
+    pub fn new(size: u16, is_enquiry: bool) -> Self {
         let encoded = Encoder::new(4).encode(&split_u16(size.clone())[..]);
         Self {
+            is_enquiry,
             total_packets: size,
             ecc: encoded.ecc().to_vec()
         }
@@ -129,6 +131,7 @@ impl TransmissionHeader {
     fn to_binary(&self) -> Vec<(u8, bool)> {
         let mut binary = vec![
             (controls::SOH, true),
+            (self.is_enquiry as u8, false),
             (((self.total_packets >> 8) as u8), false),
             ((self.total_packets as u8), false),
         ];
@@ -138,17 +141,15 @@ impl TransmissionHeader {
 }
 
 impl Transmission {
-    pub fn new(data: Vec<Packet>) -> Self {
+    pub fn new(data: Vec<Packet>, is_enquiry: bool) -> Self {
         Self {
-            header: TransmissionHeader::new(data.len() as u16),
+            header: TransmissionHeader::new(data.len() as u16, is_enquiry),
             packets: data
         }
     }
 
     pub fn from_bytes(data: Vec<u8>, byte_map: HashMap<u8, &str>) {
         let decoder = ProtocolDecoder::new(data, byte_map);
-
-
     }
 
     fn set_packets(&mut self, packets: Vec<Packet>) {
@@ -177,13 +178,10 @@ impl Transmission {
         binary.extend(
             self.packets
                 .iter()
-                .map(|packet| packet.to_binary())
-                .flatten()
+                .flat_map(|packet| packet.to_binary())
                 .collect::<Vec<(u8, bool)>>()
         );
         binary.push((controls::EOT, true));
-
-        println!("{:?}", binary);
 
         let mut clock: u8 = 0b0;
         let mut buffer: Vec<u8> = Vec::new();

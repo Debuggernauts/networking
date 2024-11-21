@@ -7,3 +7,8 @@ edition = "2021"
 b15r = { path = "./crates/b15r/" }
 indicatif = "0.17.9"
 reed-solomon = "0.2.1"
+serialport = "4.6.0"
+
+[features]
+b15f = []
+arduino = []

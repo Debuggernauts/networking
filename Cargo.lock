@@ -353,6 +353,7 @@ dependencies = [
  "b15r",
  "indicatif",
  "reed-solomon",
+ "serialport",
 ]
 
 [[package]]
