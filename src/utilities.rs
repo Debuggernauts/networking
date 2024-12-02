@@ -12,6 +12,7 @@ use crate::{
     protocol::Packet,
 };
 
+/// input 3 raw bytes, get 2 decoded bytes
 pub fn nibbles_to_bytes(nibbles: [u8; 3]) -> Vec<(u8, bool)> {
     let mut first_byte = (nibble!(nibbles[0]).0 & 0b0111) << 5;
     first_byte |= (nibble!(nibbles[0]).1 & 0b0111) << 2;

@@ -100,7 +100,16 @@ impl Packet {
         }
     }
 
-    pub fn from_binary(data: String) -> Self {
+    pub fn from_binary(data: Vec<u8>) -> Vec<Self> {
+        // SOH HEADER
+        // size: u16,
+        // pub id: u16,
+        // ecc_size: u8,
+        // SOTX
+        // DATA
+        let mut packets: Vec<Packet> = Vec::new();
+        let mut i = 0;
+
         todo!()
     }
 
@@ -149,7 +158,8 @@ impl Transmission {
     }
 
     pub fn from_bytes(data: Vec<u8>, byte_map: HashMap<u8, &str>) {
-        let decoder = ProtocolDecoder::new(data, byte_map);
+        let mut decoder = ProtocolDecoder::new(data);
+        decoder.decode();
     }
 
     fn set_packets(&mut self, packets: Vec<Packet>) {
@@ -160,7 +170,7 @@ impl Transmission {
         let encoded = Encoder::new(2).encode(&[controls::SOT]);
         let mut binary: Vec<(u8, bool)> = Vec::new();
         binary.push((controls::SOT, true));
-        binary.append(&mut encoded.ecc().iter().map(|byte| (*byte, false)).collect()); // TODO CANT EXTEND
+        binary.append(&mut encoded.ecc().iter().map(|byte| (*byte, false)).collect());
         binary
 
     }
@@ -225,7 +235,19 @@ pub struct ProtocolDecoder {
 }
 
 impl ProtocolDecoder {
-    pub fn new(data: Vec<u8>, byte_map: HashMap<u8, &str>) -> Self {
+    /// data: raw data (ohne nulln aka full bytes )
+    pub fn new(data: Vec<u8>) -> Self {
+        let byte_map = [
+            controls::SOT,
+            controls::EOT,
+            controls::SOH,
+            controls::SOTX,
+            controls::EOTX,
+            controls::ENQ,
+            controls::ACK,
+            controls::NAC,
+        ];
+
         let mut triplets = Vec::new();
 
         for chunk in data.chunks(3) {
@@ -248,25 +270,32 @@ impl ProtocolDecoder {
 
         for tuple in tuple_vec {
             bytes.push(tuple.0);
-            flags.push(tuple.1);
+            if byte_map.contains(&tuple.0) {
+                flags.push(tuple.1);
+            } else {
+                flags.push(false);
+            }
         }
 
         Self {
-            bytes,
+            bytes, // real, decoded data
             flags,
             transmission: None
         }
     }
 
-    pub fn decode(&mut self) {
+    pub fn decode(&mut self) -> Transmission {
         let transmission_header: TransmissionHeader;
-        
+
+        /// slices input stream into SOT, transmission header and packets
         let sliced = slice_vec(self.bytes.clone(), vec![SOT_SIZE,TRANSMISSION_HEADER_SIZE, self.bytes.len()-10]);
+        /// u8 vec of raw packets
         let packets = &sliced[sliced.len()-1];
         let data_size = ((packets.len() as f32 - 15.0) / 2.5) as u16; // This formula is given by: packets.len() = PACKET_HEADER_SIZE + DATA_SIZE + 1.5 * (PACKET_HEADER_SIZE + DATA_SIZE)
         let ecc_size = (packets.len() - PACKET_HEADER_SIZE - data_size as usize) as u8;
         println!("{}", data_size);
         println!("{}", ecc_size);
+        todo!()
     } 
 
 }

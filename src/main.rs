@@ -1,7 +1,11 @@
-use std::{collections::HashMap, io, io::Read, thread, thread::sleep, time::Duration};
+use b15r::DdrPin::DDRA;
+use b15r::PinPin::PINA;
+use b15r::PortPin::PORTA;
+use b15r::B15F;
+use serialport::{ClearBuffer, SerialPort};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use serialport::{ClearBuffer, SerialPort};
+use std::{collections::HashMap, io, io::Read, thread, thread::sleep, time::Duration};
 use v7::{controls, protocol::*, utilities::*};
 
 // Arduino
@@ -84,7 +88,7 @@ fn start(buffer: Vec<u8>) {
             (controls::EOTX, "EOTX"),
             (controls::ENQ, "ENQ"),
             (controls::ACK, "ACK"),
-            (controls::NAC, "NAC")
+            (controls::NAC, "NAC"),
         ]);
         let port = Arc::clone(&port);
         move || {
@@ -103,40 +107,40 @@ fn start(buffer: Vec<u8>) {
                             // let transmission = Transmission::from_bytes(buffer, byte_map.clone()); //TODO: wait for max to finish decoding
                             // let mut state = state_transmission.lock().unwrap();
                             // if transmission.header.is_enquiry {
-                                // make new transmission with broken packets
-                                // let needed_packets = transmission.packets.iter().filter(|packet| {
-                                //     let id = packet.id;
-                                //     state.packets.iter().find(|packet| packet.header.id == id)
-                                // });
-                                // let mut new_transmission = Transmission::new(needed_packets, false);
-                                // let mut out_buffer = new_transmission.to_binary();
-                                // loop {
-                                //     let mut local_port = port.lock().unwrap();
-                                    // take the first byte and send it
-                                    // let byte = out_buffer.remove(0);
-                                    // let _ = local_port.write(&[byte]);
-                                    // sleep(SEND_DELAY);
-                                // }
+                            // make new transmission with broken packets
+                            // let needed_packets = transmission.packets.iter().filter(|packet| {
+                            //     let id = packet.id;
+                            //     state.packets.iter().find(|packet| packet.header.id == id)
+                            // });
+                            // let mut new_transmission = Transmission::new(needed_packets, false);
+                            // let mut out_buffer = new_transmission.to_binary();
+                            // loop {
+                            //     let mut local_port = port.lock().unwrap();
+                            // take the first byte and send it
+                            // let byte = out_buffer.remove(0);
+                            // let _ = local_port.write(&[byte]);
+                            // sleep(SEND_DELAY);
+                            // }
                             // } else {
-                                // Check if transmission is correct
-                                //if transmission == correct {
-                                    // Transmission is correct, send ACK
-                                    // let mut local_port = port.lock().unwrap();
-                                    // let _ = local_port.write(&[controls::ACK]);
-                                    // sleep(SEND_DELAY);
-                                // } else {
-                                    // Transmission is incorrect, send enquiry with broken packets
-                                    // let mut local_port = port.lock().unwrap();
-                                    // let needed_packets = todo!();
-                                    // let chunks = chunk_data(needed_packets, 128);
-                                    // let mut new_transmission = Transmission::new(make_transmission(chunks), true);
-                                    // let mut out_buffer = new_transmission.to_binary();
-                                    // loop {
-                                    //     let byte = out_buffer.remove(0);
-                                    //     let _ = local_port.write(&[byte]);
-                                    //     sleep(SEND_DELAY);
-                                    // }
-                                // }
+                            // Check if transmission is correct
+                            //if transmission == correct {
+                            // Transmission is correct, send ACK
+                            // let mut local_port = port.lock().unwrap();
+                            // let _ = local_port.write(&[controls::ACK]);
+                            // sleep(SEND_DELAY);
+                            // } else {
+                            // Transmission is incorrect, send enquiry with broken packets
+                            // let mut local_port = port.lock().unwrap();
+                            // let needed_packets = todo!();
+                            // let chunks = chunk_data(needed_packets, 128);
+                            // let mut new_transmission = Transmission::new(make_transmission(chunks), true);
+                            // let mut out_buffer = new_transmission.to_binary();
+                            // loop {
+                            //     let byte = out_buffer.remove(0);
+                            //     let _ = local_port.write(&[byte]);
+                            //     sleep(SEND_DELAY);
+                            // }
+                            // }
                             // }
                         }
                     }
@@ -164,11 +168,46 @@ fn main() {
     let mut buffer = Vec::new();
     stdin.read_to_end(&mut buffer).unwrap();
     start(buffer);*/
-    let port = serialport::new(PORT_NAME, BAUD_RATE)
-        .timeout(Duration::from_millis(100))
-        .open().unwrap();
-    port.clear(ClearBuffer::Input).unwrap();
-    println!("Serial port opened at {}", PORT_NAME);
-    let port = Arc::new(Mutex::new(port));
-    send_nano(&port, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]);
+    // let port = serialport::new(PORT_NAME, BAUD_RATE)
+    // .timeout(Duration::from_millis(100))
+    // .open()
+    // .unwrap();
+    // port.clear(ClearBuffer::Input).unwrap();
+    // println!("Serial port opened at {}", PORT_NAME);
+    // let port = Arc::new(Mutex::new(port));
+    // std::thread::sleep(Duration::from_secs(3));
+    // send_nano(
+    // &port,
+    // vec![
+    // 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+    // 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02,
+    // 0x01,
+    // ],
+    // );
+    let mut drv = B15F::get_instance();
+    drv.set_register(DDRA, 0x0F); // set last 4 pins as output
+    let message: Vec<u8> = vec![1];
+    let chunked = chunk_data(message, 128);
+    let data = read_stdin_as_vec_u8().unwrap();
+    /*println!("{:?}", data.len());
+    println!("{:?}", Transmission::new(make_transmission(chunk_data(data.clone()))).to_binary());
+    println!("{:?}", Transmission::new(make_transmission(chunk_data(data))).to_binary().len());
+    */
+    let transmission_bins = dbg!(Transmission::new(make_transmission(chunked), false)).to_binary();
+    /*let pb = ProgressBar::new(transmission_bins.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{wide_bar} {percent}%").unwrap()
+            .progress_chars("=>-"));
+    */
+    dbg!(transmission_bins.clone());
+    for byte in &transmission_bins {
+        println!("{:08b}", byte);
+        drv.set_register(PORTA, (byte & 0xF0) >> 4);
+        sleep(Duration::from_millis(50));
+        drv.set_register(PORTA, byte & 0x0F);
+        sleep(Duration::from_millis(50));
+        //   pb.inc(1);
+    }
 }
+
+// vec of u8 in transmission, each time something is added, try to parse

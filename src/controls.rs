@@ -7,3 +7,4 @@ pub const ENQ:  u8  = 0b101;   // Enquiry
 pub const ACK:  u8  = 0b110;   // Acknowledge
 pub const NAC:  u8  = 0b10101; // Not acknowledge
 
+
