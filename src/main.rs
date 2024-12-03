@@ -6,6 +6,7 @@ use serialport::{ClearBuffer, SerialPort};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, io, io::Read, thread, thread::sleep, time::Duration};
+use indicatif::{ProgressBar, ProgressStyle};
 use v7::{controls, protocol::*, utilities::*};
 
 // Arduino
@@ -186,28 +187,36 @@ fn main() {
     // );
     let mut drv = B15F::get_instance();
     drv.set_register(DDRA, 0x0F); // set last 4 pins as output
-    let message: Vec<u8> = vec![1];
-    let chunked = chunk_data(message, 128);
-    let data = read_stdin_as_vec_u8().unwrap();
+    drv.set_register(PORTA, 0x0F); // set all pins to low
+    let message: Vec<u8> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let chunked = chunk_data(message, 10);
+    // let data = read_stdin_as_vec_u8().unwrap();
     /*println!("{:?}", data.len());
     println!("{:?}", Transmission::new(make_transmission(chunk_data(data.clone()))).to_binary());
     println!("{:?}", Transmission::new(make_transmission(chunk_data(data))).to_binary().len());
     */
     let transmission_bins = dbg!(Transmission::new(make_transmission(chunked), false)).to_binary();
-    /*let pb = ProgressBar::new(transmission_bins.len() as u64);
+    let pb = ProgressBar::new(transmission_bins.len() as u64);
         pb.set_style(ProgressStyle::default_bar()
             .template("{wide_bar} {percent}%").unwrap()
             .progress_chars("=>-"));
-    */
+
     dbg!(transmission_bins.clone());
     for byte in &transmission_bins {
-        println!("{:08b}", byte);
+        // println!("[{:2?}] {:04b}", byte >> 4, byte >> 4);
+        drv.set_register(PORTA, ((byte & 0b01110000) | 0b10000000) >> 4);
+        sleep(Duration::from_millis(25));
         drv.set_register(PORTA, (byte & 0xF0) >> 4);
-        sleep(Duration::from_millis(50));
-        drv.set_register(PORTA, byte & 0x0F);
-        sleep(Duration::from_millis(50));
-        //   pb.inc(1);
+        sleep(Duration::from_millis(25));
+
+        // println!("[{:2?}] {:04b}", byte & 0xF, byte & 0xF);
+        drv.set_register(PORTA, byte & 0b111);
+        sleep(Duration::from_millis(25));
+        drv.set_register(PORTA, byte & 0xF);
+        sleep(Duration::from_millis(25));
+        pb.inc(1);
     }
+    drv.set_register(PORTA, 0x00);
 }
 
 // vec of u8 in transmission, each time something is added, try to parse

@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use ansi_term::Color::Green;
+use ansi_term::Colour;
 use reed_solomon::{
     Encoder,
     Decoder
@@ -14,6 +16,8 @@ use crate::{
         slice_vec
     }
 };
+use ansi_term::Colour::Red;
+use crate::utilities::make_transmission;
 
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
@@ -69,13 +73,13 @@ impl PacketHeader {
             ((self.id as u8), false),
             (self.ecc_size, false),
             (controls::SOTX, true),
-        ] 
+        ]
     }
 
     pub fn empty() -> Self {
         Self {
             size: 0,
-        id: 0,
+            id: 0,
             ecc_size: 0
         }
     }
@@ -181,7 +185,7 @@ impl Transmission {
     /// CDDI
     pub fn to_binary(&self) -> Vec<u8> {
         let mut binary: Vec<(u8, bool)> = Vec::new();
-        
+
         let start = Transmission::create_start();
         binary.extend(start);
         binary.extend(self.header.to_binary());
@@ -192,6 +196,8 @@ impl Transmission {
                 .collect::<Vec<(u8, bool)>>()
         );
         binary.push((controls::EOT, true));
+        
+        dbg!(&binary);
 
         let mut clock: u8 = 0b0;
         let mut buffer: Vec<u8> = Vec::new();
@@ -227,6 +233,7 @@ impl Transmission {
         result
     }
 }
+
 
 pub struct ProtocolDecoder {
     bytes: Vec<u8>,
@@ -277,6 +284,22 @@ impl ProtocolDecoder {
             }
         }
 
+        if bytes.last() == Some(&0) {
+            bytes.pop();
+            flags.pop();
+        }
+
+        print!("prot_bytes: [");
+        for i in 0..bytes.len() {
+            if flags[i] {
+                print!("{}, ", Red.paint(bytes[i].to_string()));
+            } else {
+                print!("{}, ", Green.paint(bytes[i].to_string()));
+            }
+        }
+        println!("]");
+
+
         Self {
             bytes, // real, decoded data
             flags,
@@ -286,6 +309,7 @@ impl ProtocolDecoder {
 
     pub fn decode(&mut self) -> Transmission {
         let transmission_header: TransmissionHeader;
+        let packets: Vec<Packet> = Vec::new();
 
         /// slices input stream into SOT, transmission header and packets
         let sliced = slice_vec(self.bytes.clone(), vec![SOT_SIZE,TRANSMISSION_HEADER_SIZE, self.bytes.len()-10]);
@@ -293,9 +317,11 @@ impl ProtocolDecoder {
         let packets = &sliced[sliced.len()-1];
         let data_size = ((packets.len() as f32 - 15.0) / 2.5) as u16; // This formula is given by: packets.len() = PACKET_HEADER_SIZE + DATA_SIZE + 1.5 * (PACKET_HEADER_SIZE + DATA_SIZE)
         let ecc_size = (packets.len() - PACKET_HEADER_SIZE - data_size as usize) as u8;
-        println!("{}", data_size);
-        println!("{}", ecc_size);
-        todo!()
-    } 
+        println!("data_size: {}", data_size);
+        println!("ecc_size: {}", ecc_size);
+        todo!();
+        //let transmission: Transmission = Transmission::new(packets, );
+        //transmission
+    }
 
 }
