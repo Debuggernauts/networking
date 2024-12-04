@@ -8,7 +8,7 @@ use crate::protocol::ProtocolDecoder;
 
 const PORT_NAME: &str = "/dev/ttyUSB0";
 const BAUD_RATE: u32 = 115200;
-const SEND_DELAY: Duration = Duration::from_millis(40);
+const SEND_DELAY: Duration = Duration::from_millis(50);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Open the serial port
@@ -21,23 +21,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     thread::sleep(SEND_DELAY);
     println!("Serial port opened at {}", PORT_NAME);
-    let _ = port.write(&[0xF0, 0b1, 0xF0, 0b1]); // random bytes lol
+    let _ = port.write(&[0xFF, 0b0, 0xFF, 0b0]); // random bytes lol
 
     let mut bytes: Vec<u8> = String::from("H").into_bytes();
     let mut received: Vec<u8> = Vec::new();
     let mut received_finished = false;
     loop {
-        // Write data
-
-        // TODO: Max [daten zum senden vorbereiten]
         if !bytes.is_empty() {
             println!("Send: {}", String::from_utf8_lossy(&bytes));
             send_nano(&mut port, bytes.remove(0)); // WICHTIG: nur ein byte at the time [sonst kann man nicht gleichzeitig empfangen]
         }
 
-        if (received_finished) {
-            continue;
-        }
         match receive_nano(&mut port, 1) {
             Ok(data) => {
                 print!("Received:{:2?} - [", data.as_bytes());
@@ -51,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match range {
                         Some((start, end)) => {
                             let data = received.clone();
-                            received_finished = true;
+                            received.clear();
                             thread::spawn(move || {
                                 println!("Start - end: {} - {}", start, end);
                                 let sliced_data = slice_data(data, start, end);
@@ -146,10 +140,7 @@ fn print_colored_byte(byte: u8) {
     let bits: Vec<String> = (0..4)
         .rev()
         .map(|i| {
-            // Get the value of the bit
             let bit = (byte >> i) & 1;
-
-            // Colorize the second bit (bit index 6)
             if i == 3 {
                 if bit == 1 {
                     Colour::Green.paint(format!("{}", bit)).to_string()

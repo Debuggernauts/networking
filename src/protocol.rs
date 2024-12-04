@@ -229,7 +229,6 @@ impl Transmission {
                 result.push(combined);
             }
         }
-
         result
     }
 }
@@ -250,9 +249,9 @@ impl ProtocolDecoder {
             controls::SOH,
             controls::SOTX,
             controls::EOTX,
-            controls::ENQ,
-            controls::ACK,
-            controls::NAC,
+            //controls::ENQ,
+            //controls::ACK,
+            //controls::NAC,
         ];
 
         let mut triplets = Vec::new();
@@ -291,10 +290,11 @@ impl ProtocolDecoder {
 
         print!("prot_bytes: [");
         for i in 0..bytes.len() {
+            let byte = bytes[i].to_string();
             if flags[i] {
-                print!("{}, ", Red.paint(bytes[i].to_string()));
+                print!("{}, ", Red.paint(byte));
             } else {
-                print!("{}, ", Green.paint(bytes[i].to_string()));
+                print!("{}, ", Green.paint(byte));
             }
         }
         println!("]");
@@ -308,8 +308,30 @@ impl ProtocolDecoder {
     }
 
     pub fn decode(&mut self) -> Transmission {
+        /*
+        [
+        7, 9, 14,
+        1, 0, 0, 5, 19, 14, 5, 29,
+        1, 0, 30, 0, 1, 15,
+        2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 28, 6, 18, 20, 6, 24, 28, 8, 26, 31, 3, 19, 11, 24, 8,
+        1, 0, 30, 0,
+        2, 15, 2, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 14, 14, 11, 2, 15, 12, 21, 16, 2, 10, 31, 6, 18, 3,
+        1, 0, 30, 0, 3, 15,
+        2, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 26, 13, 30, 3, 20, 8, 9, 27, 6, 12, 15, 19, 14, 7, 2,
+        1, 0, 30, 0, 4, 15,
+        2, 9, 10, 0, 1, 2, 3, 4, 5, 6, 7, 9, 14, 10, 30, 9, 23, 30, 6, 14, 18, 27, 22, 11, 7, 23,
+        1, 0, 9, 0, 5, 4,
+        2, 8, 9, 10, 19, 31, 8, 11,
+        4,
+        ]
+         */
+        let chunks = split_data(self.bytes, self.flags);
+        for chunk in chunks {
+        }
+
         let transmission_header: TransmissionHeader;
         let packets: Vec<Packet> = Vec::new();
+
 
         /// slices input stream into SOT, transmission header and packets
         let sliced = slice_vec(self.bytes.clone(), vec![SOT_SIZE,TRANSMISSION_HEADER_SIZE, self.bytes.len()-10]);
@@ -324,4 +346,27 @@ impl ProtocolDecoder {
         //transmission
     }
 
+}
+
+fn split_data<T: Clone>(data: Vec<T>, flags: Vec<bool>) -> Vec<Vec<T>> {
+    if data.len() != flags.len() {
+        panic!("Data and flags vectors must have the same length");
+    }
+
+    let mut chunks: Vec<Vec<T>> = Vec::new();
+    let mut current_chunk: Vec<T> = Vec::new();
+
+    for (value, flag) in data.into_iter().zip(flags.into_iter()) {
+        if flag && !current_chunk.is_empty() {
+            chunks.push(current_chunk);
+            current_chunk = Vec::new();
+        }
+        current_chunk.push(value);
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    chunks
 }
