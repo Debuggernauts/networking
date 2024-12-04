@@ -1,12 +1,12 @@
-use ansi_term::Color::{Blue, Red, Yellow};
-use ansi_term::Colour;
+use ansi_term::Color::{Blue, Red, Yellow, Green};
 use serialport::{ClearBuffer, SerialPort};
 use std::io::Write;
 use std::{io, thread, time::Duration};
-
+use reed_solomon::Decoder;
+use crate::error;
 use crate::protocol::ProtocolDecoder;
 
-const PORT_NAME: &str = "/dev/ttyUSB0";
+const PORT_NAME: &str = "/dev/ttyUSB1";
 const BAUD_RATE: u32 = 115200;
 const SEND_DELAY: Duration = Duration::from_millis(50);
 
@@ -19,13 +19,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     port.clear(ClearBuffer::Input)?;
     port.clear(ClearBuffer::Output)?;
 
-    thread::sleep(SEND_DELAY);
+    // thread::sleep(SEND_DELAY);
     println!("Serial port opened at {}", PORT_NAME);
     let _ = port.write(&[0xFF, 0b0, 0xFF, 0b0]); // random bytes lol
 
     let mut bytes: Vec<u8> = String::from("H").into_bytes();
     let mut received: Vec<u8> = Vec::new();
-    let mut received_finished = false;
     loop {
         if !bytes.is_empty() {
             println!("Send: {}", String::from_utf8_lossy(&bytes));
@@ -47,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let data = received.clone();
                             received.clear();
                             thread::spawn(move || {
-                                println!("Start - end: {} - {}", start, end);
+                                //println!("Start - end: {} - {}", start, end);
                                 let sliced_data = slice_data(data, start, end);
                                 //println!("sliced_data: {:?}", sliced_data);
                                 let mut squashed_data: Vec<u8> = Vec::new();
@@ -65,7 +64,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 //println!("squashed_data: {:?}", squashed_data);
                                 let mut p = ProtocolDecoder::new(squashed_data);
-                                p.decode();
+                                let transmission = p.decode();
+                                dbg!(&transmission);
+                                // todo: TransHeader überprüfen ob alle packet da und so
+
+                                for mut packet in transmission.packets {
+                                    let decoder = Decoder::new(packet.header.ecc_size as usize);
+                                    let header_vec = packet.header.to_vec();
+                                    let mut msg = header_vec.clone();
+                                    msg.append(&mut packet.data.clone());
+                                    msg.append(&mut packet.ecc.clone());
+                                    dbg!(&msg);
+                                    let decoded = decoder.correct_err_count(&*msg, None);
+                                    match decoded {
+                                        Ok(content) => {
+                                            let buffer = content.0;
+                                            let errors = content.1;
+                                            if errors > 0 {
+                                                eprintln!("Packet {} had {} errors!", packet.header.id, errors)
+                                            }
+                                            dbg!(&buffer.data());
+                                            packet.data = buffer.data().to_vec()[header_vec.len()..].to_owned();
+                                            packet.ecc = buffer.ecc().to_vec();
+                                            // todo: in datei schreiben
+                                        }
+                                        Err(e) => {
+                                            // TODO: packet not recoverable, enquiry
+                                            error!("Packet unrecoverable: {e:?}\n{packet:?}");
+                                        }
+                                    }
+                                }
+                                panic!("Do you have panic?? Hihihi!");
                             });
                         }
                         None => (),
@@ -73,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("]");
             }
-            Err(e) => (), //println!("{}", e),
+            Err(_e) => (),
         }
     }
 }
@@ -81,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn slice_data(received: Vec<u8>, start: usize, end: usize) -> Vec<u8> {
     received
         .get(start..end + 3)
-        .expect("Failed to slice recieved data")
+        .expect("Failed to slice received data")
         .to_vec()
 }
 
@@ -95,17 +124,17 @@ fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
         let nibble_0 = p0[i];
         let nibble_1 = p0[i + 1];
         let nibble_2 = p0[i + 2];
-        // there are 2 theoretically possible combinations of SOT (main difference being clock)
-        if ((nibble_0 == 0b0 || nibble_0 == 0b1000)
+        // there are 2 theoretically possible combinations of SOT (main difference being clocked)
+        if (nibble_0 == 0b0 || nibble_0 == 0b1000)
             && (nibble_1 == 0b0 || nibble_1 == 0b1001)
             && (nibble_2 == 0b111 || nibble_2 == 0b1111)
-            && !start_found)
+            && !start_found
         {
             // found SOT
             start_found = true;
             print!("{} {}", Yellow.paint("start_found".to_string()), i);
             start_index = i;
-            if (start_found && (p0.len() - start_index) % 3 == 0) {
+            if start_found && (p0.len() - start_index) % 3 == 0 {
                 println!("\n---------------------")
             }
             break;
@@ -117,9 +146,9 @@ fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
         let nibble_1 = p0[i + 1];
         let nibble_2 = p0[i + 2];
 
-        if ((nibble_0 == 0b0 || nibble_0 == 0b1000)
+        if (nibble_0 == 0b0 || nibble_0 == 0b1000)
             && (nibble_1 == 0b1001 || nibble_1 == 0b1)
-            && (nibble_2 == 0b1 || nibble_2 == 0b1001))
+            && (nibble_2 == 0b1 || nibble_2 == 0b1001)
         {
             // found EOT
             end_found = true;
@@ -143,9 +172,9 @@ fn print_colored_byte(byte: u8) {
             let bit = (byte >> i) & 1;
             if i == 3 {
                 if bit == 1 {
-                    Colour::Green.paint(format!("{}", bit)).to_string()
+                    Green.paint(format!("{}", bit)).to_string()
                 } else {
-                    Colour::Red.paint(format!("{}", bit)).to_string()
+                    Red.paint(format!("{}", bit)).to_string()
                 }
             } else {
                 format!("{}", bit)
@@ -173,14 +202,3 @@ fn receive_nano(port: &mut Box<dyn SerialPort>, buffer_size: usize) -> Result<St
         Err(e) => Err(e),
     }
 }
-
-/*
-Probleme:
-- Arduino ersten 2 bits nicht gesendet
-- noice vor empfangen
-- gleichzeitiges Senden Empfangen
-- Errorkorrektur
-- Fehler erkennen, anfragen nach Fehlern senden und beantworten
--
-
- */

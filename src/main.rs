@@ -164,6 +164,9 @@ fn start() {
     todo!();
 }
 
+/// 15
+const CLK_DELAY: u64 = 5;
+
 fn main() {
     /*let mut stdin = io::stdin();
     let mut buffer = Vec::new();
@@ -196,24 +199,25 @@ fn main() {
     println!("{:?}", Transmission::new(make_transmission(chunk_data(data))).to_binary().len());
     */
     let transmission_bins = dbg!(Transmission::new(make_transmission(chunked), false)).to_binary();
+    // let transmission_bins = Transmission::new(make_transmission(chunked), false).to_binary();
     let pb = ProgressBar::new(transmission_bins.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{wide_bar} {percent}%").unwrap()
-            .progress_chars("=>-"));
+    pb.set_style(ProgressStyle::default_bar()
+        .template("[{wide_bar}] [{percent}%] [{elapsed}] [ETA: {eta}] [{bytes_per_sec}] [{pos}/{len}]").unwrap()
+        .progress_chars("=>-"));
 
-    dbg!(transmission_bins.clone());
+    dbg!(&transmission_bins);
     for byte in &transmission_bins {
         // println!("[{:2?}] {:04b}", byte >> 4, byte >> 4);
         drv.set_register(PORTA, ((byte & 0b01110000) | 0b10000000) >> 4);
-        sleep(Duration::from_millis(25));
+        sleep(Duration::from_millis(CLK_DELAY));
         drv.set_register(PORTA, (byte & 0xF0) >> 4);
-        sleep(Duration::from_millis(25));
+        sleep(Duration::from_millis(CLK_DELAY));
 
         // println!("[{:2?}] {:04b}", byte & 0xF, byte & 0xF);
         drv.set_register(PORTA, byte & 0b111);
-        sleep(Duration::from_millis(25));
+        sleep(Duration::from_millis(CLK_DELAY));
         drv.set_register(PORTA, byte & 0xF);
-        sleep(Duration::from_millis(25));
+        sleep(Duration::from_millis(CLK_DELAY));
         pb.inc(1);
     }
     drv.set_register(PORTA, 0x00);

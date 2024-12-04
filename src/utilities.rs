@@ -8,11 +8,11 @@ use std::{
 };
 use crate::{
     nibble,
-    controls,
     protocol::Packet,
 };
 
 /// input 3 raw bytes, get 2 decoded bytes
+/// approved: da liegt nicht der fehler ihr Deppen ;)
 pub fn nibbles_to_bytes(nibbles: [u8; 3]) -> Vec<(u8, bool)> {
     let mut first_byte = (nibble!(nibbles[0]).0 & 0b0111) << 5;
     first_byte |= (nibble!(nibbles[0]).1 & 0b0111) << 2;
@@ -20,10 +20,9 @@ pub fn nibbles_to_bytes(nibbles: [u8; 3]) -> Vec<(u8, bool)> {
     let mut second_byte = (nibble!(nibbles[1]).1 & 0b0111) << 5;
     second_byte |= (nibble!(nibbles[2]).0 & 0b0111) << 2;
     second_byte |= (nibble!(nibbles[2]).1 & 0b0110) >> 1;
-    
+
     let is_control_one: bool = nibble!(nibbles[1]).0 & 0b1 == 1;
     let is_control_two: bool = nibble!(nibbles[2]).1 & 0b1 == 1;
-    
     vec![
         (first_byte, is_control_one),
         (second_byte, is_control_two),
@@ -44,7 +43,7 @@ pub fn read_stdin_as_vec_u8() -> io::Result<Vec<u8>> {
 }
 
 pub fn read_pipe() -> String {
-    let stdin = std::io::stdin(); 
+    let stdin = io::stdin(); 
     let handle = stdin.lock();
 
     for line in handle.lines() {
@@ -56,7 +55,7 @@ pub fn read_pipe() -> String {
             }
         }
     }
-    return "".to_string();
+    "".to_string()
 }
 
 /*pub fn make_transmission(data: Vec<Vec<u8>>) -> Vec<Packet> {
@@ -97,7 +96,7 @@ pub fn split_u16(bytes: u16) -> [u8; 2] {
 }
 
 pub fn chunk_data(data: Vec<u8>, size: usize) -> Vec<Vec<u8>> {
-    let mut chunks: Vec<Vec<u8>> = data.chunks(size)
+    let chunks: Vec<Vec<u8>> = data.chunks(size)
         .map(|chunk| chunk.to_vec())  // Convert each chunk into a Vec<u8>
         .collect();
 
@@ -153,7 +152,7 @@ pub fn debug_print(transmission: Vec<u8>, control: HashMap<u8, &str>) {
         .map(|chunk| chunk.to_vec())  // Convert each chunk of 3 nibbles into a Vec<String>
         .collect();
 
-    for mut group in &mut grouped {
+    for group in &mut grouped {
         if group.len() < 2 {
             continue
         }
@@ -163,7 +162,7 @@ pub fn debug_print(transmission: Vec<u8>, control: HashMap<u8, &str>) {
         if (group.len() == 3) && (group[2].chars().nth(3).unwrap() == '1') {
             group[1] += &format!("\t{}", control.get(&u8::from_str_radix(get_data(combined).as_str(), 2).unwrap()).unwrap());
         }
-        else if (group.len() == 3) {
+        else if group.len() == 3 {
             group[1] += &format!("\t{}", u8::from_str_radix(get_data(combined).as_str(), 2).unwrap())
         }
     }
