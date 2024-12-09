@@ -192,6 +192,8 @@ impl Transmission {
     pub fn to_binary(&self) -> Vec<u8> {
         let mut binary: Vec<(u8, bool)> = Vec::new();
 
+        let start = Transmission::create_start();
+        binary.extend(start);
         binary.extend(self.header.to_binary());
         binary.extend(
             self.packets

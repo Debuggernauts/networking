@@ -204,7 +204,8 @@ fn main() {
     pb.set_style(ProgressStyle::default_bar()
         .template("[{wide_bar}] [{percent}%] [{elapsed}] [ETA: {eta}] [{bytes_per_sec}] [{pos}/{len}]").unwrap()
         .progress_chars("=>-"));
-
+    
+    assert_eq!(transmission_bins[0], 9);
     dbg!(&transmission_bins);
     for byte in &transmission_bins {
         // println!("[{:2?}] {:04b}", byte >> 4, byte >> 4);
