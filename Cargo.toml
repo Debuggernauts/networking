@@ -10,6 +10,7 @@ reed-solomon = "0.2.1"
 serialport = "4.6.0"
 ansi_term = "0.12.1"
 colored = "2.1.0"
+chrono = "0.4.39"
 
 [features]
 b15f = []

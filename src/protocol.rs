@@ -1,10 +1,11 @@
+use ansi_term::Color::Green;
+use ansi_term::Colour::Red;
+use reed_solomon::Encoder;
+
 use crate::{
     controls, fatal, nibble,
     utilities::{nibbles_to_bytes, split_u16},
 };
-use ansi_term::Color::Green;
-use ansi_term::Colour::Red;
-use reed_solomon::Encoder;
 
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
@@ -38,6 +39,7 @@ impl PacketHeader {
         Self { size, id, ecc_size }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_vec(&self) -> Vec<u8> {
         vec![
             controls::SOH,
@@ -76,17 +78,17 @@ impl Packet {
     pub fn new(packet_data: Vec<u8>, id: u16) -> Self {
         let data_size = packet_data.len();
         let ecc_size = (data_size as f32 * 1.5) as usize;
-        // data size encoded is 3 times the size of the data
-        let header = PacketHeader::new(((data_size as f32) * 1.5_f32) as u16, id, ecc_size as u8);
+        // data size encoded is 3 times the size of the data, 1 raw byte == 3 encoded nibbles
+        let header = PacketHeader::new((data_size * 3) as u16, id, ecc_size as u8);
 
         let mut complete_data = Vec::new();
         complete_data.append(&mut header.to_vec());
         complete_data.append(&mut packet_data.clone());
 
-        let encoded = Encoder::new(ecc_size.clone()).encode(&complete_data[..]);
+        let encoded = Encoder::new(ecc_size).encode(&complete_data[..]);
 
         Self {
-            header: PacketHeader::new((data_size * 3) as u16, id, ecc_size as u8),
+            header,
             data: packet_data,
             ecc: encoded.ecc().to_vec(),
         }
@@ -95,19 +97,16 @@ impl Packet {
     pub fn from_binary(data: Vec<Vec<u8>>) -> Vec<Self> {
         let mut packets: Vec<Packet> = Vec::new();
 
-        for i in (0..data.len()-1).step_by(2) {
-            let header = data[i + 0].clone();
-            let size: u16 = ((header[1] as u16) << 8 | (header[2] as u16))/3*2;
+        for i in (0..data.len() - 1).step_by(2) {
+            let header = data[i].clone();
+            // in encoded nibbles, so 1 raw byte == 3 encoded nibbles
+            let size: u16 = (header[1] as u16) << 8 | (header[2] as u16);
             let id: u16 = (header[3] as u16) << 8 | (header[4] as u16);
             let ecc_size: u8 = header[5];
             let bytes = data[i + 1].clone();
-            let pack_header = PacketHeader {
-                size,
-                id,
-                ecc_size,
-            };
-            let data = bytes[1..(size/3 + 1) as usize].to_vec();
-            let ecc = bytes[(size/3 + 1) as usize..].to_vec();
+            let pack_header = PacketHeader { size, id, ecc_size };
+            let data = bytes[1..(size / 3 + 1) as usize].to_vec();
+            let ecc = bytes[(size / 3 + 1) as usize..].to_vec();
 
             let packet = Packet {
                 header: pack_header,
@@ -139,7 +138,7 @@ impl Packet {
 
 impl TransmissionHeader {
     pub fn new(size: u16, is_enquiry: bool) -> Self {
-        let encoded = Encoder::new(4).encode(&split_u16(size.clone())[..]);
+        let encoded = Encoder::new(4).encode(&split_u16(size)[..]);
         Self {
             is_enquiry,
             total_packets: size,
@@ -168,11 +167,13 @@ impl Transmission {
         }
     }
 
-    pub fn from_bytes(data: Vec<u8>) { //  , byte_map: HashMap<u8, &str>
+    pub fn from_bytes(data: Vec<u8>) {
+        //  , byte_map: HashMap<u8, &str>
         let mut decoder = ProtocolDecoder::new(data);
         decoder.decode();
     }
 
+    #[allow(dead_code)]
     fn set_packets(&mut self, packets: Vec<Packet>) {
         self.packets = packets;
     }
@@ -203,7 +204,7 @@ impl Transmission {
         );
         binary.push((controls::EOT, true));
 
-        dbg!(&binary);
+        // dbg!(&binary);
 
         let mut clock: u8 = 0b0;
         let mut buffer: Vec<u8> = Vec::new();
@@ -242,6 +243,7 @@ impl Transmission {
 pub struct ProtocolDecoder {
     bytes: Vec<u8>,
     flags: Vec<bool>,
+    #[allow(dead_code)]
     transmission: Option<Transmission>,
 }
 
@@ -268,14 +270,14 @@ impl ProtocolDecoder {
             }
             triplets.push(arr);
         }
-        
+
         let mut tuple_vec = Vec::new();
         for triplet in triplets {
             let bytes = nibbles_to_bytes(triplet);
             tuple_vec.push(bytes[0]);
             tuple_vec.push(bytes[1]);
         }
-        
+
         let mut bytes = Vec::new();
         let mut flags = Vec::new();
 
@@ -292,10 +294,7 @@ impl ProtocolDecoder {
             bytes.pop();
             flags.pop();
         }
-/*
-protokoll_bytes: [3, 7, 9, 14, 1, 0, 0, 5, 51, 238, 133, 93, 1, 0, 30, 0, 1, 15, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 252, 198, 178, 116, 134, 120, 188, 136, 90, 191, 67, 51, 75, 88, 168, 1, 0, 30, 0, 2, 15, 2, 100, 1, 2, 3, 4, 5, 6, 7, 8, 9, 112, 14, 78, 11, 194, 239, 76, 149, 16, 34, 106, 31, 70, 50, 131, 1, 0, 30, 0, 3, 15, 2, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 186, 109, 94, 99, 180, 168, 9, 123, 38, 204, 175, 19, 110, 103, 194, 1, 0, 30, 0, 4, 15, 2, 9, 10, 0, 1, 2, 3, 4, 5, 6, 7, 73, 14, 74, 126, 41, 55, 190, 166, 206, 242, 91, 150, 75, 39, 247, 1, 0, 9, 0, 5, 4, 2, 8, 9, 10, 179, 191, 168, 171, 4, ]
-fucking 3
- */
+
         print!("protokoll_bytes: [");
         for i in 0..bytes.len() {
             let byte = bytes[i].to_string();
@@ -340,7 +339,7 @@ fucking 3
 
         let transmission: Transmission = Transmission {
             header: transmission_header.unwrap(),
-            packets
+            packets,
         };
         transmission
     }
