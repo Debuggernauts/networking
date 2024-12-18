@@ -1,30 +1,29 @@
 use std::{io, thread, time::Duration};
 use std::fs::File;
 use std::io::Write;
-use std::thread::sleep;
 
 use ansi_term::Color::Yellow;
-use b15r::B15F;
+use b15r::{B15F, Port0};
 use b15r::DdrPin::DDRA;
 use b15r::PinPin::PINA;
 use b15r::PortPin::PORTA;
 use indicatif::{ProgressBar, ProgressStyle};
 use reed_solomon::Decoder;
-use serialport::{ClearBuffer, SerialPort};
+use serialport::{new, ClearBuffer, SerialPort};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use v7::info;
 use v7::protocol::{ProtocolDecoder, Transmission};
 use v7::utilities::{chunk_data, make_transmission, print_colored_byte, read_stdin_as_vec_u8, slice_data, start_and_end, u16_to_u8_vec};
 
-// todo: beide seiten senden, empfangen, encoden
 // todo: enquireys
 
 #[allow(dead_code)]
-const PORT_NAME: &str = "/dev/ttyUSB0";
+const PORT_NAME: &str = "/dev/ttyUSB2";
 #[allow(dead_code)]
 const BAUD_RATE: u32 = 115200;
 // const CLK_DELAY: u64 = 4;
-const CLK_DELAY: u64 = 15;
+const CLK_DELAY: u128 = 20;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     ////////// init //////////
@@ -48,9 +47,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let transmission = Transmission::new(make_transmission(chunked), false);
     let mut transmission_bins = transmission.clone().to_binary();
+    println!("trans bins: {:?}", transmission_bins);
 
-    for _ in 0..30 {
+    transmission_bins = ready_for_send(transmission_bins);
+
+    println!("trans bins: {:?}", transmission_bins);
+
+    for _ in 0..60 {
         transmission_bins.insert(0, 0);
+        transmission_bins.insert(0, 0b1000);
     }
     let pb = ProgressBar::new(transmission_bins.len() as u64);
     pb.set_style(ProgressStyle::default_bar()
@@ -61,19 +66,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut received: Vec<u8> = Vec::new();
 
 
-    // zum testen
+    // zum Testen
     read_stdin_as_vec_u8().expect("dumm");
+
+    let mut previousMillis = SystemTime::now().duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis();
+
 
     loop {
         ////////// send //////////
-        if !transmission_bins.is_empty() {
-            let byte = transmission_bins.remove(0);
-            // b15
-            send_b15(&mut drv, byte);
-            // nano
-            // send_nano(&mut port, byte);
+        let currentMillis = SystemTime::now().duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
 
-            pb.inc(1);
+        // Check if the interval has elapsed
+        if currentMillis - previousMillis >= CLK_DELAY {
+            // Save the current time as the last executed time
+            previousMillis = currentMillis;
+            if !transmission_bins.is_empty() {
+                let byte = transmission_bins.remove(0);
+                send_b15(&mut drv, byte);
+                // send_nano(&mut port, byte);
+
+                pb.inc(1);
+            }
         }
 
         ////////// receive //////////
@@ -100,13 +117,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let chunked = chunk_data(u16_to_u8_vec(false_ids), 32);
 
                     let transmission = Transmission::new(make_transmission(chunked), true);
-                    transmission_bins.extend(transmission.clone().to_binary());
+                    transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
                 }
                 println!("]");
             }
             Err(_e) => (),
         }
     }
+}
+
+
+fn ready_for_send(transmission_bins: Vec<u8>) -> Vec<u8> {
+    let new_transmission_bins: Vec<u8> = transmission_bins
+        .iter()
+        .flat_map(|&byte| {
+            // Oberes und unteres Nibble berechnen
+            // println!("byte: {:08b}", byte);
+            let upper_nibble = byte >> 4;
+            let upper_clock = upper_nibble & 0b1000;
+            let lower_nibble = byte & 0xF;
+            let lower_clock = lower_nibble & 0b1000;
+
+            // println!("upper: {:04b}", upper_nibble | (!upper_clock & 0b1000));
+            // println!("upclk: {:04b}", upper_nibble);
+            // println!("lower: {:04b}", lower_nibble & ((!lower_clock & 0b1000) | 0b0111));
+            // println!("lwclk: {:04b}", lower_nibble);
+
+            vec![
+                // Daten für oberes Nibble
+                upper_nibble | (!upper_clock & 0b1000),
+                // Clock-Signal für oberes Nibble
+                upper_nibble,
+                // Daten für unteres Nibble
+                lower_nibble & ((!lower_clock & 0b1000) | 0b0111),
+                // Clock-Signal für unteres Nibble
+                lower_nibble,
+            ]
+        })
+        .collect();
+    new_transmission_bins
 }
 
 ////////// nano functions //////////
@@ -130,28 +179,10 @@ fn setup_nano() -> Box<dyn SerialPort> {
 
 #[allow(dead_code)]
 fn send_nano(port: &mut Box<dyn SerialPort>, byte: u8) {
-    //println!("{:08b}", byte);
     print!("Send: [");
-    print_colored_byte(byte >> 4);
-    println!("]");
-    //println!("[{:2?}] {:04b}", ((byte & 0b01110000) | 0b10000000) >> 4, ((byte & 0b01110000) | 0b10000000) >> 4);
-    port.write_all(&[((byte & 0b0111_0000) | 0b1000_0000) >> 4])
-        .expect("port write panicked");
-    //println!("[{:2?}] {:04b}", (byte & 0xF0) >> 4, (byte & 0xF0) >> 4);
-    sleep(Duration::from_millis(CLK_DELAY));
-    port.write_all(&[(byte & 0xF0) >> 4])
-        .expect("port write panicked");
-    sleep(Duration::from_millis(CLK_DELAY));
-
-    print!("send: [");
     print_colored_byte(byte & 0xF);
     println!("]");
-    //println!("[{:2?}] {:04b}", byte & 0b111, byte & 0b111);
-    port.write_all(&[byte & 0b111]).expect("port write panicked");
-    //println!("[{:2?}] {:04b}", byte & 0xF, byte & 0xF);
-    sleep(Duration::from_millis(CLK_DELAY));
     port.write_all(&[byte & 0xF]).expect("port write panicked");
-    sleep(Duration::from_millis(CLK_DELAY));
 }
 
 #[allow(dead_code)]
@@ -177,29 +208,17 @@ fn setup_b15() -> B15F {
 
 #[allow(dead_code)]
 fn send_b15(drv: &mut B15F, byte: u8) {
-    dbg!();
-    // println!("[{:2?}] {:04b}", byte >> 4, byte >> 4);
-    print!("Send: [");
-    print_colored_byte(byte >> 4);
-    println!("]");
-    drv.set_register(PORTA, ((byte & 0b0111_0000) | 0b1000_0000) >> 4);
-    sleep(Duration::from_millis(CLK_DELAY));
-    drv.set_register(PORTA, (byte & 0xF0) >> 4);
-    sleep(Duration::from_millis(CLK_DELAY));
-
-    // println!("[{:2?}] {:04b}", byte & 0xF, byte & 0xF);
     print!("Send: [");
     print_colored_byte(byte & 0xF);
     println!("]");
-    drv.set_register(PORTA, byte & 0b111);
-    sleep(Duration::from_millis(CLK_DELAY));
-    drv.set_register(PORTA, byte & 0xF);
-    sleep(Duration::from_millis(CLK_DELAY));
+    // drv.set_register(PORTA, byte & 0xF);
+    drv.digital_write(Port0, byte & 0xF);
 }
 
 #[allow(dead_code)]
 fn receive_b15(drv: &mut B15F, clock: &mut u8) -> Result<u8, io::Error> {
-    let received_data = (drv.get_register(PINA) & 0xF0) >> 4;
+    // let received_data = (drv.get_register(PINA) & 0xF0) >> 4;
+    let received_data = drv.digital_read(Port0) & 0xF;
     let new_clock = received_data & 0b1000;
     // dbg!();
     if *clock == new_clock {

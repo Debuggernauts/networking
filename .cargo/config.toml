@@ -1,0 +1,2 @@
+[target.x86_64-unknown-linux-gnu]
+runner = "sudo" # Select this runner for espflash v3.x.x

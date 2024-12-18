@@ -229,7 +229,7 @@ pub fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
         }
     }
 
-    for i in (0..p0.len() - 2).rev() {
+    for i in (start_index..p0.len() - 2).rev() {
         let nibble_0 = p0[i];
         let nibble_1 = p0[i + 1];
         let nibble_2 = p0[i + 2];
