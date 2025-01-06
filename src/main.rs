@@ -1,6 +1,7 @@
-use std::{io, thread, time::Duration};
+use std::{io, time::Duration};
 use std::fs::File;
 use std::io::Write;
+use std::mem;
 
 use ansi_term::Color::Yellow;
 use b15r::{B15F, Port0};
@@ -10,7 +11,7 @@ use b15r::PortPin::PORTA;
 use indicatif::{ProgressBar, ProgressStyle};
 use reed_solomon::Decoder;
 use serialport::{new, ClearBuffer, SerialPort};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use v7::info;
 use v7::protocol::{ProtocolDecoder, Transmission};
@@ -19,21 +20,24 @@ use v7::utilities::{chunk_data, make_transmission, print_colored_byte, read_stdi
 // todo: enquireys
 
 #[allow(dead_code)]
-const PORT_NAME: &str = "/dev/ttyUSB2";
+const PORT_NAME: &str = "/dev/ttyUSB0";
 #[allow(dead_code)]
 const BAUD_RATE: u32 = 115200;
 // const CLK_DELAY: u64 = 4;
-const CLK_DELAY: u128 = 20;
+const CLK_DELAY: u128 = 100;
+
+const CHUNK_SIZE: usize = 32;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut transmission_packet_array: Vec<Vec<u8>> = (0..u16::MAX)
+        .map(|_| Vec::new())
+        .collect();
+
     ////////// init //////////
     let mut clock = 0;
 
-    let mut drv = setup_b15();
-    // let mut port = setup_nano();
-
-    // delay zum warten auf anderes Gerät
-    // sleep(Duration::from_millis(2000));
+    // let mut drv = setup_b15();
+    let mut port = setup_nano();
 
     ////////// data setup //////////
     // from file -> Transmission
@@ -43,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     // let data = read_stdin_as_vec_u8().unwrap();
 
-    let chunked = chunk_data(message, 32);
+    let chunked = chunk_data(message, CHUNK_SIZE);
 
     let transmission = Transmission::new(make_transmission(chunked), false);
     let mut transmission_bins = transmission.clone().to_binary();
@@ -53,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("trans bins: {:?}", transmission_bins);
 
-    for _ in 0..60 {
+    for _ in 0..20 {
         transmission_bins.insert(0, 0);
         transmission_bins.insert(0, 0b1000);
     }
@@ -86,8 +90,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             previousMillis = currentMillis;
             if !transmission_bins.is_empty() {
                 let byte = transmission_bins.remove(0);
-                send_b15(&mut drv, byte);
-                // send_nano(&mut port, byte);
+                // send_b15(&mut drv, byte);
+                send_nano(&mut port, byte);
 
                 pb.inc(1);
             }
@@ -96,8 +100,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ////////// receive //////////
 
         let receiver: Result<u8, io::Error> = {
-            receive_b15(&mut drv, &mut clock)
-            // receive_nano(&mut port, 1)
+            // receive_b15(&mut drv, &mut clock)
+            receive_nano(&mut port, 1)
         };
 
         match receiver {
@@ -113,11 +117,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let data = received.clone();
                     received.clear();
                     // TODO: this returns ids of packets that are not recoverable
-                    let false_ids = auswertung(data, start, end);
-                    let chunked = chunk_data(u16_to_u8_vec(false_ids), 32);
+                    let start_time = Instant::now(); // Record the start time
 
-                    let transmission = Transmission::new(make_transmission(chunked), true);
-                    transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
+                    let false_ids = auswertung(data, start, end, &mut transmission_packet_array, &transmission);
+
+                    let duration = start_time.elapsed();
+                    for _ in 0..10 {
+                        println!("Function took {:?} to execute", duration);
+                    }
+                    
+                    if false_ids.is_empty() {
+                        //TODO: in datei schreiben
+                    } else {
+                        let chunked = chunk_data(u16_to_u8_vec(false_ids), CHUNK_SIZE);
+                        let transmission = Transmission::new(make_transmission(chunked), true);
+                        transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
+                    }
                 }
                 println!("]");
             }
@@ -231,25 +246,23 @@ fn receive_b15(drv: &mut B15F, clock: &mut u8) -> Result<u8, io::Error> {
 }
 
 ////////// other functions //////////
-fn auswertung(data: Vec<u8>, start: usize, end: usize) -> Vec<u16> {
-    let decode_thread = thread::spawn(move || {
-        let sliced_data = slice_data(data, start, end);
-        let mut squashed_data: Vec<u8> = Vec::new();
-        for x in sliced_data.chunks(2) {
-            let mut res: u8 = 0b0;
-            res |= x[0] << 4;
-            let second_nibble = x.get(1);
-            if let Some(nibble) = second_nibble {
-                res |= nibble;
-            }
-            squashed_data.push(res);
+fn auswertung(data: Vec<u8>, start: usize, end: usize, transmission_packet_array: &mut Vec<Vec<u8>>, init_transmission: &Transmission) -> Vec<u16> {
+    let sliced_data = slice_data(data, start, end);
+    let mut squashed_data: Vec<u8> = Vec::new();
+    for x in sliced_data.chunks(2) {
+        let mut res: u8 = 0b0;
+        res |= x[0] << 4;
+        let second_nibble = x.get(1);
+        if let Some(nibble) = second_nibble {
+            res |= nibble;
         }
-        let mut p = ProtocolDecoder::new(squashed_data);
-        let transmission = p.decode();
+        squashed_data.push(res);
+    }
+    let mut p = ProtocolDecoder::new(squashed_data);
+    let transmission = p.decode();
 
-        // todo: TransHeader überprüfen ob alle packet da und so
-        let mut file_data: Vec<u8> = Vec::new();
-        let mut unrepairable_packets: Vec<u16> = Vec::new();
+    if transmission.header.is_enquiry {
+        let mut ids: Vec<u16> = Vec::new();
         for mut packet in transmission.packets {
             let decoder = Decoder::new(packet.header.ecc_size as usize);
             let header_vec = packet.header.to_vec();
@@ -265,30 +278,68 @@ fn auswertung(data: Vec<u8>, start: usize, end: usize) -> Vec<u16> {
                     if errors > 0 {
                         eprintln!("Packet {} had {} errors!", packet.header.id, errors);
                     }
-                    packet.data = buffer.data().to_vec()[header_vec.len()..].to_owned();
+                    buffer.data().to_vec()[header_vec.len()..].clone_into(&mut packet.data);
                     packet.ecc = buffer.ecc().to_vec();
-                    println!(
-                        "{}",
-                        Yellow.paint("Alles gut!!! -> in datei schreiben (todo)")
-                    );
-                    // todo: eigentlich. in Vec schreiben und erst wenn alle da sind: in file
-                    // file_data[packet.id] = packet.data
-                    file_data.extend(packet.data);
+                    let local_ids: Vec<u16> = packet.data.chunks(2).map(|x| {
+                        u16::from_le_bytes([x[0], x[1]])
+                    }).collect();
+                    ids.extend(local_ids);
+                    
+                    // TODO: respond with data for requested packets
+                    // init_transmission
+                    //let chunked = chunk_data(u16_to_u8_vec(false_ids), CHUNK_SIZE);
+                    //let transmission = Transmission::new(make_transmission(chunked), true);
+                    //transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
                 }
                 Err(e) => {
                     // TODO: packet not recoverable, enquiry
-                    // wenn ein packet komplett fehlt?
-                    // enquiry erstellen, in send schicken
-                    info!("Packet unrecoverable: {e:?}\n{packet:?}");
-                    unrepairable_packets.push(packet.header.id);
+                    info!("Packet unrecoverable: {e:?}\n{packet:?}, We're fucked!");
                 }
             }
         }
-        let mut file =
-            File::create(format!("output{}.bin", chrono::Utc::now().timestamp())).unwrap();
-        file.write_all(&file_data).expect("file write panicked");
-        unrepairable_packets
-        // panic!("Do you have panic?? ;)");
-    });
-    decode_thread.join().unwrap()
+        todo!("Figure out enquiries heh")
+    } else {
+    // todo: TransHeader überprüfen ob alle packet da und so
+    //let mut file_data: Vec<u8> = Vec::new();
+    let mut unrepairable_packets: Vec<u16> = Vec::new();
+    for mut packet in transmission.packets {
+        let decoder = Decoder::new(packet.header.ecc_size as usize);
+        let header_vec = packet.header.to_vec();
+        let mut msg = header_vec.clone();
+        msg.append(&mut packet.data.clone());
+        msg.append(&mut packet.ecc.clone());
+        println!("{:?}", &msg);
+        let decoded = decoder.correct_err_count(&msg, None);
+        match decoded {
+            Ok(content) => {
+                let buffer = content.0;
+                let errors = content.1;
+                if errors > 0 {
+                    eprintln!("Packet {} had {} errors!", packet.header.id, errors);
+                }
+                buffer.data().to_vec()[header_vec.len()..].clone_into(&mut packet.data);
+                packet.ecc = buffer.ecc().to_vec();
+                println!(
+                    "{}",
+                    Yellow.paint("Alles gut!!! -> in datei schreiben (todo)")
+                );
+                // todo: eigentlich. in Vec schreiben und erst wenn alle da sind: in file
+                // file_data[packet.id] = packet.data
+                //file_data.extend(packet.data.clone());
+                transmission_packet_array[packet.header.id as usize] = packet.data;
+            }
+            Err(e) => {
+                // TODO: packet not recoverable, enquiry
+                // wenn ein packet komplett fehlt?
+                // enquiry erstellen, in send schicken
+                info!("Packet unrecoverable: {e:?}\n{packet:?}");
+                unrepairable_packets.push(packet.header.id);
+            }
+        }
+    }
+    //let mut file = File::create("output.bin").unwrap();
+    //file.write_all(&file_data).expect("file write panicked");
+    unrepairable_packets
+    // panic!("Do you have panic?? ;)");
+    }
 }
