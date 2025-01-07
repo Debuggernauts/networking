@@ -97,7 +97,7 @@ impl Packet {
     pub fn from_binary(data: Vec<Vec<u8>>) -> Vec<Self> {
         let mut packets: Vec<Packet> = Vec::new();
 
-        for i in (0..data.len() - 1).step_by(2) {
+        for i in (0..data.len()).step_by(2) {// todo das mit der -1 hehe weiß nicht warum, vielleicht macht das probleme
             let header = data[i].clone();
             // in encoded nibbles, so 1 raw byte == 3 encoded nibbles
             let size: u16 = (header[1] as u16) << 8 | (header[2] as u16);
@@ -113,7 +113,7 @@ impl Packet {
                 data,
                 ecc,
             };
-            dbg!(&packet);
+            // dbg!(&packet);
             packets.push(packet);
         }
         /*println!("data (from_binary): ");
@@ -334,6 +334,7 @@ impl ProtocolDecoder {
         }
         if transmission_header.is_none() {
             fatal!("Transmission header not found");
+
         }
         let packets: Vec<Packet> = Packet::from_binary(chunks[2..chunks.len() - 1].to_vec());
 
