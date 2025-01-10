@@ -3,9 +3,10 @@ use ansi_term::Colour::Red;
 use reed_solomon::Encoder;
 
 use crate::{
-    controls, fatal, nibble,
+    controls, fatal, info, nibble,
     utilities::{nibbles_to_bytes, split_u16},
 };
+use crate::controls::SOH;
 
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
@@ -96,30 +97,46 @@ impl Packet {
 
     pub fn from_binary(data: Vec<Vec<u8>>) -> Vec<Self> {
         let mut packets: Vec<Packet> = Vec::new();
+        
+        // TODO: rework this
+        for i in (0..data.len()).step_by(2) {
+            if let (Some(header), Some(bytes)) = (data.get(i), data.get(i + 1)) {
+                if let (
+                    Some(&size_high),
+                    Some(&size_low),
+                    Some(&id_high),
+                    Some(&id_low),
+                    Some(&ecc_size),
+                ) = (
+                    header.get(1),
+                    header.get(2),
+                    header.get(3),
+                    header.get(4),
+                    header.get(5),
+                ) {
+                    let size: u16 = (size_high as u16) << 8 | (size_low as u16);
+                    let id: u16 = (id_high as u16) << 8 | (id_low as u16);
+                    let pack_header = PacketHeader { size, id, ecc_size };
 
-        for i in (0..data.len()).step_by(2) {// todo das mit der -1 hehe weiß nicht warum, vielleicht macht das probleme
-            let header = data[i].clone();
-            // in encoded nibbles, so 1 raw byte == 3 encoded nibbles
-            let size: u16 = (header[1] as u16) << 8 | (header[2] as u16);
-            let id: u16 = (header[3] as u16) << 8 | (header[4] as u16);
-            let ecc_size: u8 = header[5];
-            let bytes = data[i + 1].clone();
-            let pack_header = PacketHeader { size, id, ecc_size };
-            let data = bytes[1..(size / 3 + 1) as usize].to_vec();
-            let ecc = bytes[(size / 3 + 1) as usize..].to_vec();
-
-            let packet = Packet {
-                header: pack_header,
-                data,
-                ecc,
-            };
-            // dbg!(&packet);
-            packets.push(packet);
+                    if let Some(data) = bytes.get(1..(size / 3 + 1) as usize) {
+                        if let Some(ecc) = bytes.get((size / 3 + 1) as usize..) {
+                            let packet = Packet {
+                                header: pack_header,
+                                data: data.to_vec(),
+                                ecc: ecc.to_vec(),
+                            };
+                            packets.push(packet);
+                        }
+                    } else {
+                        info!("Invalid Header: {header:?}");
+                    }
+                } else {
+                    let data1 = data.get(i);
+                    let data2 = data.get(i + 1);
+                    info!("Could not parse packet header: {data1:?}\n{data2:?}");
+                }
+            }
         }
-        /*println!("data (from_binary): ");
-        for elem in &packets {
-            println!("  -> {:?}", elem);
-        }*/
         packets
     }
 
@@ -305,7 +322,7 @@ impl ProtocolDecoder {
             }
         }
         println!("]");
-
+        
         Self {
             bytes, // real, decoded data
             flags,
@@ -334,7 +351,6 @@ impl ProtocolDecoder {
         }
         if transmission_header.is_none() {
             fatal!("Transmission header not found");
-
         }
         let packets: Vec<Packet> = Packet::from_binary(chunks[2..chunks.len() - 1].to_vec());
 
@@ -348,9 +364,7 @@ impl ProtocolDecoder {
 
 /// Splits data at each control sequence
 fn split_data<T: Clone>(data: Vec<T>, flags: Vec<bool>) -> Vec<Vec<T>> {
-    if data.len() != flags.len() {
-        panic!("Data and flags vectors must have the same length");
-    }
+    assert_eq!(data.len(), flags.len(), "Data and flags vectors must have the same length");
 
     let mut chunks: Vec<Vec<T>> = Vec::new();
     let mut current_chunk: Vec<T> = Vec::new();
