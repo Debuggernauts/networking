@@ -7,6 +7,12 @@ use crate::{
     utilities::{nibbles_to_bytes, split_u16},
 };
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum State {
+    Normal,
+    WaitingForResponse,
+}
+
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
     pub is_enquiry: bool,
@@ -313,7 +319,7 @@ impl ProtocolDecoder {
             flags.pop();
         }
 
-        eprint!("protokoll_bytes: [");
+        /*eprint!("protokoll_bytes: [");
         for i in 0..bytes.len() {
             let byte = bytes[i].to_string();
             if flags[i] {
@@ -322,8 +328,8 @@ impl ProtocolDecoder {
                 eprint!("{}, ", Green.paint(byte));
             }
         }
-        eprintln!("]");
-        
+        eprintln!("]");*/
+
         Self {
             bytes, // real, decoded data
             flags,
@@ -364,7 +370,11 @@ impl ProtocolDecoder {
 
 /// Splits data at each control sequence
 fn split_data<T: Clone>(data: Vec<T>, flags: Vec<bool>) -> Vec<Vec<T>> {
-    assert_eq!(data.len(), flags.len(), "Data and flags vectors must have the same length");
+    assert_eq!(
+        data.len(),
+        flags.len(),
+        "Data and flags vectors must have the same length"
+    );
 
     let mut chunks: Vec<Vec<T>> = Vec::new();
     let mut current_chunk: Vec<T> = Vec::new();

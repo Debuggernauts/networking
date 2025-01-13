@@ -1,9 +1,6 @@
-use std::{
-    io,
-    io::Read,
-};
+use std::{io, io::Read};
 
-use ansi_term::Color::{Green, Red};
+use ansi_term::Color::{Blue, Green, Red, Yellow};
 
 use crate::{nibble, protocol::Packet};
 
@@ -90,7 +87,7 @@ pub fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
         {
             // found SOT
             start_found = true;
-            // eprint!("{} {}", Yellow.paint("start_found".to_string()), i);
+            //eprint!("{} {}", Yellow.paint("start_found".to_string()), i);
             start_index = i;
             if start_found && (p0.len() - start_index) % 3 == 0 {
                 // eprintln!("\n---------------------");
@@ -111,7 +108,7 @@ pub fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
             // found EOT
             if start_found && (i - start_index) % 3 == 0 {
                 end_found = true;
-                // eprintln!("{} {}", Blue.paint("end_found".to_string()), i);
+                //eprintln!("{} {}", Blue.paint("end_found".to_string()), i);
                 end_index = i;
 
                 break;

@@ -10,20 +10,20 @@ use indicatif::{ProgressBar, ProgressStyle};
 use reed_solomon::Decoder;
 use serialport::{ClearBuffer, SerialPort};
 
-use v7::protocol::{ProtocolDecoder, Transmission};
+use v7::protocol::{ProtocolDecoder, State, Transmission};
 use v7::utilities::{
-    chunk_data, make_transmission, print_colored_byte, read_stdin_as_vec_u8, ready_for_send,
-    slice_data, start_and_end, u16_to_u8_vec,
+    chunk_data, make_transmission, read_stdin_as_vec_u8, ready_for_send, slice_data, start_and_end,
+    u16_to_u8_vec,
 };
 use v7::{error, info};
 
-// timeout: wenn enq/antw.len()ort darauf nicht ankommen
 // TODO: 1 Packet pro Transmission
 
 #[allow(dead_code)]
-const PORT_NAME: &str = "/dev/ttyUSB0";
+const PORT_NAME: &str = "/dev/ttyUSB1";
 #[allow(dead_code)]
 const BAUD_RATE: u32 = 115_200;
+const TIMEOUT: u128 = 2000;
 
 // Nano <-> Nano: 4ms
 // B15 <-> Nano: 20ms (15ms?)
@@ -31,14 +31,16 @@ const CLK_DELAY: u128 = 15;
 
 const CHUNK_SIZE: usize = 16;
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut transmission_packet_array: Vec<Vec<u8>> = (0..u16::MAX).map(|_| Vec::new()).collect();
-
     ////////// init //////////
-    #[allow(dead_code)]
-    let mut clock = 0;
+    let mut state = State::Normal;
+    let mut transmission_packet_array: Vec<Vec<u8>> = (0..u16::MAX).map(|_| Vec::new()).collect();
+    let mut broken_ids: Vec<u16> = Vec::new();
 
-    // let mut drv = setup_b15();
+    #[allow(dead_code)]
+    let mut clock = 0; // needed for b15
+                       // let mut drv = setup_b15();
     let mut port = setup_nano();
 
     ////////// data setup //////////
@@ -49,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
     ];
     // from file -> Transmission
-    let data = read_stdin_as_vec_u8().unwrap();
+    // let data = read_stdin_as_vec_u8().unwrap();
 
     let chunked = chunk_data(data, CHUNK_SIZE);
 
@@ -58,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     transmission_bins = ready_for_send(transmission_bins);
 
-    for _ in 0..1000 {
+    for _ in 0..100 {
         // TODO: iwann entfernen oder weniger
         transmission_bins.insert(0, 0);
         transmission_bins.insert(0, 0b1000);
@@ -70,6 +72,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
             .progress_chars("=>-"),
     );
+
+    ////////// timeout //////////
+    let mut start_timeout = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis();
 
     ////////// main loop //////////
     let mut received: Vec<u8> = Vec::new();
@@ -94,6 +102,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !transmission_bins.is_empty() {
                 let byte = transmission_bins.remove(0);
 
+                start_timeout = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis();
+
                 pb.suspend(|| {
                     // send_b15(&mut drv, byte);
                     send_nano(&mut port, byte);
@@ -110,10 +123,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         match receiver {
             Ok(byte) => {
-                pb.suspend(|| {
-                    // eprint!("Received:{byte:2?} - [");
-                    // print_colored_byte(byte);
-                });
+                start_timeout = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis();
+                // pb.suspend(|| {
+                //     eprint!("Received:{byte:2?} - [");
+                //     print_colored_byte(byte);
+                // });
                 received.push(byte);
                 if received.len() < 6 {
                     continue;
@@ -126,40 +143,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let data = received.clone();
                     received.clear();
                     // INFO: this returns ids of packets that are not recoverable or missing
-                    let false_ids = auswertung(
-                        data,
-                        start,
-                        end,
-                        &mut transmission_packet_array,
-                        &transmission,
-                        &mut transmission_bins,
-                    );
-
-                    eprintln!(
-                        "Es müssen {}/{} neugesendet werden",
-                        false_ids.len(),
-                        transmission.header.total_packets
-                    );
-
+                    pb.suspend(|| {
+                        broken_ids = auswertung(
+                            data,
+                            start,
+                            end,
+                            &mut transmission_packet_array,
+                            &transmission,
+                            &mut transmission_bins,
+                            &mut state,
+                        );
+                    });
                     pb.set_position(0);
                     pb.set_length(transmission_bins.len() as u64);
 
-                    if false_ids.is_empty() {
+                    if broken_ids.is_empty() {
                         pb.finish();
                     } else {
-                        let chunked = chunk_data(u16_to_u8_vec(false_ids), CHUNK_SIZE);
+                        pb.suspend(|| {
+                            info!("Need {} packets to be resent!", broken_ids.len());
+                        });
+                        let chunked = chunk_data(u16_to_u8_vec(broken_ids.clone()), CHUNK_SIZE);
                         let transmission = Transmission::new(make_transmission(chunked), true);
                         transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
-
+                        state = State::WaitingForResponse;
                         pb.set_position(0);
                         pb.set_length((transmission_bins.len() - 1) as u64);
                     }
                 }
                 pb.suspend(|| {
-                    // eprintln!("]");
+                    //eprintln!("]");
                 });
             }
             Err(_e) => (),
+        }
+
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis();
+        if current_time - start_timeout >= TIMEOUT {
+            start_timeout = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis();
+            if state == State::WaitingForResponse {
+                pb.suspend(|| {
+                    info!("Timeout: resending Enquiry!");
+                });
+                received.clear();
+                let chunked = chunk_data(u16_to_u8_vec(broken_ids.clone()), CHUNK_SIZE);
+                let transmission = Transmission::new(make_transmission(chunked), true);
+                transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
+            }
         }
     }
 }
@@ -247,6 +283,7 @@ fn auswertung(
     transmission_packet_array: &mut Vec<Vec<u8>>,
     init_transmission: &Transmission,
     transmission_bins: &mut Vec<u8>,
+    state: &mut State,
 ) -> Vec<u16> {
     let sliced_data = slice_data(data, start, end);
     let mut squashed_data: Vec<u8> = Vec::new();
@@ -269,13 +306,20 @@ fn auswertung(
             let mut msg = header_vec.clone();
             msg.append(&mut packet.data.clone());
             msg.append(&mut packet.ecc.clone());
+            if msg.len() > 96 {
+                error!("Packet too long: {}", msg.len());
+                continue;
+            }
             let decoded = decoder.correct_err_count(&msg, None);
             match decoded {
                 Ok(content) => {
                     let buffer = content.0;
                     let errors = content.1;
                     if errors > 0 {
-                        info!("Packet {} had {} errors!", packet.header.id, errors);
+                        info!(
+                            "Repaired Packet {}, had {} errors!",
+                            packet.header.id, errors
+                        );
                     }
                     buffer.data().to_vec()[header_vec.len()..].clone_into(&mut packet.data);
                     packet.ecc = buffer.ecc().to_vec();
@@ -301,23 +345,29 @@ fn auswertung(
             }
         }
         transmission_bins.extend(ready_for_send(transmission_now.clone().to_binary()));
+        info!("Responding to Enquiry...");
     } else {
+        *state = State::Normal;
         for mut packet in transmission.packets {
             let decoder = Decoder::new(packet.header.ecc_size as usize);
             let header_vec = packet.header.to_vec();
             let mut msg = header_vec.clone();
             msg.append(&mut packet.data.clone());
             msg.append(&mut packet.ecc.clone());
+            if msg.len() > 96 {
+                error!("Packet too long: {}", msg.len());
+                continue;
+            }
             let decoded = decoder.correct_err_count(&msg, None);
             match decoded {
                 Ok((buffer, errors)) => {
                     if errors > 0 {
-                        error!("Packet {} had {} errors!", packet.header.id, errors);
+                        info!("Packet {} had {} errors!", packet.header.id, errors);
                     }
                     buffer.data().to_vec()[header_vec.len()..].clone_into(&mut packet.data);
                     packet.ecc = buffer.ecc().to_vec();
                     info!(
-                        "{} - Packet {}/{}",
+                        "{} ({}/{})",
                         Yellow.paint("Packet OK"),
                         packet.header.id,
                         transmission.header.total_packets
@@ -343,7 +393,7 @@ fn auswertung(
     if unrepairable_packets.is_empty() && !transmission.header.is_enquiry {
         let result: Vec<u8> = transmission_packet_array.concat();
         let mut stdout = io::stdout();
-        error!("daten in .bin schreiben...");
+        info!("Writing data to stdout...");
         stdout.write_all(&result).expect("write failed");
         stdout.flush().expect("flush failed");
     }
