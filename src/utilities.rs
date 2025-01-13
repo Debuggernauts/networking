@@ -1,11 +1,9 @@
-use std::fmt::Write;
 use std::{
-    collections::HashMap,
     io,
-    io::{BufRead, Read},
+    io::Read,
 };
 
-use ansi_term::Color::{Blue, Green, Red, Yellow};
+use ansi_term::Color::{Green, Red};
 
 use crate::{nibble, protocol::Packet};
 
@@ -23,56 +21,11 @@ pub fn nibbles_to_bytes(nibbles: [u8; 3]) -> Vec<(u8, bool)> {
     vec![(first_byte, is_control_one), (second_byte, is_control_two)]
 }
 
-pub fn read_bin_file(file_path: &str) -> Vec<u8> {
-    let mut file = std::fs::File::open(file_path).expect("Couldn't open file!");
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .expect("Couldn't read binary file!");
-    buffer
-}
-
 pub fn read_stdin_as_vec_u8() -> io::Result<Vec<u8>> {
     let mut buffer: Vec<u8> = Vec::new();
     io::stdin().read_to_end(&mut buffer)?;
     Ok(buffer)
 }
-
-pub fn read_pipe() -> String {
-    let stdin = io::stdin();
-    let handle = stdin.lock();
-
-    if let Some(line) = handle.lines().next() {
-        match line {
-            Ok(line) => return line,
-            Err(e) => {
-                eprintln!("Error reading line: {e}");
-            }
-        }
-    }
-
-    String::new()
-}
-
-/*pub fn make_transmission(data: Vec<Vec<u8>>) -> Vec<Packet> {
-    let mut id = 0;
-    let mut transmission = Vec::new();
-    let start = Packet::new(vec![controls::SOT], 0);
-
-    transmission.push(start);
-
-
-
-    let mut packets = Vec::new();
-    for packet in data {
-        id += 1;
-        packets.push(Packet::new(packet, id))
-    }
-    transmission.extend(packets);
-    id += 1;
-    let end = Packet::new(vec![controls::EOT], id);
-    transmission.push(end);
-    transmission
-}*/
 
 pub fn make_transmission(data: Vec<Vec<u8>>) -> Vec<Packet> {
     let mut id = 0;
@@ -97,88 +50,6 @@ pub fn chunk_data(data: Vec<u8>, size: usize) -> Vec<Vec<u8>> {
         .collect();
 
     chunks
-}
-
-pub fn slice_vec(input: Vec<u8>, sizes: Vec<usize>) -> Vec<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut start = 0;
-
-    for &size in &sizes {
-        let end = start + size;
-        if end > input.len() {
-            break;
-        }
-        result.push(input[start..end].to_vec());
-        start = end;
-    }
-
-    result
-}
-
-pub fn bytes_to_binary_str(data: Vec<u8>) -> String {
-    data.iter()
-        .map(|byte| format!("{:08b}", byte))
-        .collect::<String>()
-}
-
-pub fn binary_str_to_bytes(data: String) -> Vec<u8> {
-    data.as_bytes()
-        .chunks(8)
-        .map(|chunk| {
-            let byte_str = std::str::from_utf8(chunk).unwrap();
-            u8::from_str_radix(byte_str, 2)
-        })
-        .collect::<Result<Vec<u8>, _>>()
-        .unwrap()
-}
-
-pub fn debug_print(transmission: Vec<u8>, control: HashMap<u8, &str>) {
-    let binary_str: String = transmission.iter().fold(String::new(), |mut output, byte| {
-        write!(output, "{byte:08b}").unwrap();
-        output
-    }); // Convert each byte to a binary string of 8 bits
-
-    let nibbles: Vec<String> = binary_str
-        .chars()
-        .collect::<Vec<char>>()
-        .chunks(4)
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect();
-
-    let mut grouped: Vec<Vec<String>> = nibbles
-        .chunks(3)
-        .map(<[String]>::to_vec) // Convert each chunk of 3 nibbles into a Vec<String>
-        .collect();
-
-    for group in &mut grouped {
-        if group.len() < 2 {
-            continue;
-        }
-        let combined = group.clone().join("");
-        let data = &get_data(combined.clone());
-        group[1] += &format!("\t{data}");
-        if (group.len() == 3) && (group[2].chars().nth(3).unwrap() == '1') {
-            group[1] += &format!(
-                "\t{}",
-                control
-                    .get(&u8::from_str_radix(get_data(combined).as_str(), 2).unwrap())
-                    .unwrap()
-            );
-        } else if group.len() == 3 {
-            group[1] += &format!(
-                "\t{}",
-                u8::from_str_radix(get_data(combined).as_str(), 2).unwrap()
-            );
-        }
-    }
-
-    for group in &grouped {
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..group.len() {
-            println!("{}", group[i]);
-        }
-        println!("---");
-    }
 }
 
 fn get_data(encoded_string: String) -> String {
@@ -219,10 +90,10 @@ pub fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
         {
             // found SOT
             start_found = true;
-            print!("{} {}", Yellow.paint("start_found".to_string()), i);
+            // eprint!("{} {}", Yellow.paint("start_found".to_string()), i);
             start_index = i;
             if start_found && (p0.len() - start_index) % 3 == 0 {
-                println!("\n---------------------");
+                // eprintln!("\n---------------------");
             }
             break;
         }
@@ -240,7 +111,7 @@ pub fn start_and_end(p0: &Vec<u8>) -> Option<(usize, usize)> {
             // found EOT
             if start_found && (i - start_index) % 3 == 0 {
                 end_found = true;
-                println!("{} {}", Blue.paint("end_found".to_string()), i);
+                // eprintln!("{} {}", Blue.paint("end_found".to_string()), i);
                 end_index = i;
 
                 break;
@@ -273,7 +144,7 @@ pub fn print_colored_byte(byte: u8) {
         .collect();
 
     // Join the colored bits into a string
-    print!("{}", bits.join(""));
+    eprint!("{}", bits.join(""));
 }
 
 pub fn u16_to_u8_vec(input: Vec<u16>) -> Vec<u8> {
@@ -283,4 +154,35 @@ pub fn u16_to_u8_vec(input: Vec<u16>) -> Vec<u8> {
         output.push((value >> 8) as u8); // Hohes Byte
     }
     output
+}
+
+pub fn ready_for_send(transmission_bins: Vec<u8>) -> Vec<u8> {
+    let new_transmission_bins: Vec<u8> = transmission_bins
+        .iter()
+        .flat_map(|&byte| {
+            // Oberes und unteres Nibble berechnen
+            // eprintln!("byte: {:08b}", byte);
+            let upper_nibble = byte >> 4;
+            let upper_clock = upper_nibble & 0b1000;
+            let lower_nibble = byte & 0xF;
+            let lower_clock = lower_nibble & 0b1000;
+
+            // eprintln!("upper: {:04b}", upper_nibble | (!upper_clock & 0b1000));
+            // eprintln!("upclk: {:04b}", upper_nibble);
+            // eprintln!("lower: {:04b}", lower_nibble & ((!lower_clock & 0b1000) | 0b0111));
+            // eprintln!("lwclk: {:04b}", lower_nibble);
+
+            vec![
+                // Daten für oberes Nibble
+                upper_nibble | (!upper_clock & 0b1000),
+                // Clock-Signal für oberes Nibble
+                upper_nibble,
+                // Daten für unteres Nibble
+                lower_nibble & ((!lower_clock & 0b1000) | 0b0111),
+                // Clock-Signal für unteres Nibble
+                lower_nibble,
+            ]
+        })
+        .collect();
+    new_transmission_bins
 }

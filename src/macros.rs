@@ -11,7 +11,7 @@ macro_rules! info {
         eprintln!(
             "[{}] {}",
             "\x1b[32m\x1b[1mINFO\x1b[0m",
-            format!($fmt $( $args)*)
+            format!($fmt, $($args),*)
         )
     };
 }
@@ -22,7 +22,7 @@ macro_rules! error {
         eprintln!(
             "[{}] {}",
             "\x1b[31m\x1b[1mERROR\x1b[0m",
-            format!($fmt $( $args)*)
+            format!($fmt, $($args),*)
         )
     };
 }
@@ -33,7 +33,7 @@ macro_rules! fatal {
         eprintln!(
             "[{}] {}",
             "\x1b[31m\x1b[1m\x1b[5mFATAL\x1b[0m",
-            format!($fmt $( $args)*)
+            format!($fmt, $($args),*)
         );
         std::process::exit(1);
     };

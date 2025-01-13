@@ -6,7 +6,6 @@ use crate::{
     controls, fatal, info, nibble,
     utilities::{nibbles_to_bytes, split_u16},
 };
-use crate::controls::SOH;
 
 #[derive(Debug, Clone)]
 pub struct TransmissionHeader {
@@ -97,23 +96,27 @@ impl Packet {
 
     pub fn from_binary(data: Vec<Vec<u8>>) -> Vec<Self> {
         let mut packets: Vec<Packet> = Vec::new();
-        
-        // TODO: rework this
-        for i in (0..data.len()).step_by(2) {
+
+        for i in 0..data.len() {
             if let (Some(header), Some(bytes)) = (data.get(i), data.get(i + 1)) {
                 if let (
+                    Some(&control),
                     Some(&size_high),
                     Some(&size_low),
                     Some(&id_high),
                     Some(&id_low),
                     Some(&ecc_size),
                 ) = (
+                    header.first(),
                     header.get(1),
                     header.get(2),
                     header.get(3),
                     header.get(4),
                     header.get(5),
                 ) {
+                    if control != controls::SOH {
+                        continue;
+                    }
                     let size: u16 = (size_high as u16) << 8 | (size_low as u16);
                     let id: u16 = (id_high as u16) << 8 | (id_low as u16);
                     let pack_header = PacketHeader { size, id, ecc_size };
@@ -166,7 +169,7 @@ impl TransmissionHeader {
     #[allow(clippy::cast_possible_truncation)]
     fn to_binary(&self) -> Vec<(u8, bool)> {
         let mut binary = vec![
-            (controls::SOH, true),
+            (controls::SOT, true),
             (self.is_enquiry as u8, false),
             ((self.total_packets >> 8) as u8, false),
             (self.total_packets as u8, false),
@@ -210,8 +213,6 @@ impl Transmission {
     pub fn to_binary(&self) -> Vec<u8> {
         let mut binary: Vec<(u8, bool)> = Vec::new();
 
-        let start = Transmission::create_start();
-        binary.extend(start);
         binary.extend(self.header.to_binary());
         binary.extend(
             self.packets
@@ -272,7 +273,7 @@ impl ProtocolDecoder {
             controls::EOT,
             controls::SOH,
             controls::SOTX,
-            controls::EOTX,
+            // controls::EOTX,
             //controls::ENQ,
             //controls::ACK,
             //controls::NAC,
@@ -312,16 +313,16 @@ impl ProtocolDecoder {
             flags.pop();
         }
 
-        print!("protokoll_bytes: [");
+        eprint!("protokoll_bytes: [");
         for i in 0..bytes.len() {
             let byte = bytes[i].to_string();
             if flags[i] {
-                print!("{}, ", Red.paint(byte));
+                eprint!("{}, ", Red.paint(byte));
             } else {
-                print!("{}, ", Green.paint(byte));
+                eprint!("{}, ", Green.paint(byte));
             }
         }
-        println!("]");
+        eprintln!("]");
         
         Self {
             bytes, // real, decoded data
@@ -332,27 +333,27 @@ impl ProtocolDecoder {
 
     pub fn decode(&mut self) -> Transmission {
         let chunks = split_data(self.bytes.clone(), self.flags.clone());
+        dbg!(&chunks);
 
-        let trans_header_chunks = chunks[0..2].to_vec();
+        let trans_header_chunks = chunks[0].clone();
         let mut transmission_header: Option<TransmissionHeader> = None;
-        for chunk in trans_header_chunks {
-            if chunk[0] == 1u8 {
-                let is_enquiry: bool = chunk[1] & 0b1 == 1;
-                //dbg!(&chunk);
-                let total_packets: u16 = (chunk[2] as u16) << 8 | (chunk[3] as u16);
-                let ecc: Vec<u8> = chunk[4..].to_vec();
-                transmission_header = Some(TransmissionHeader {
-                    is_enquiry,
-                    total_packets,
-                    ecc,
-                });
-                break;
-            }
+        let chunk = trans_header_chunks;
+        if chunk[0] == controls::SOT {
+            let is_enquiry: bool = chunk[1] & 0b1 == 1;
+            //dbg!(&chunk);
+            let total_packets: u16 = (chunk[2] as u16) << 8 | (chunk[3] as u16);
+            let ecc: Vec<u8> = chunk[4..].to_vec();
+            transmission_header = Some(TransmissionHeader {
+                is_enquiry,
+                total_packets,
+                ecc,
+            });
         }
+
         if transmission_header.is_none() {
             fatal!("Transmission header not found");
         }
-        let packets: Vec<Packet> = Packet::from_binary(chunks[2..chunks.len() - 1].to_vec());
+        let packets: Vec<Packet> = Packet::from_binary(chunks[1..chunks.len() - 1].to_vec());
 
         let transmission: Transmission = Transmission {
             header: transmission_header.unwrap(),
