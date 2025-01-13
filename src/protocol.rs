@@ -333,7 +333,6 @@ impl ProtocolDecoder {
 
     pub fn decode(&mut self) -> Transmission {
         let chunks = split_data(self.bytes.clone(), self.flags.clone());
-        dbg!(&chunks);
 
         let trans_header_chunks = chunks[0].clone();
         let mut transmission_header: Option<TransmissionHeader> = None;

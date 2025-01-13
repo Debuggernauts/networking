@@ -1,23 +1,23 @@
-use std::{io, time::Duration};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{io, time::Duration};
 
 use ansi_term::Color::Yellow;
-use b15r::{B15F, Port0};
 use b15r::DdrPin::DDRA;
 use b15r::PortPin::PORTA;
+use b15r::{Port0, B15F};
 use indicatif::{ProgressBar, ProgressStyle};
 use reed_solomon::Decoder;
 use serialport::{ClearBuffer, SerialPort};
 
-use v7::{error, info};
 use v7::protocol::{ProtocolDecoder, Transmission};
 use v7::utilities::{
-    chunk_data, make_transmission, print_colored_byte, read_stdin_as_vec_u8, slice_data,
-    start_and_end, u16_to_u8_vec, ready_for_send,
+    chunk_data, make_transmission, print_colored_byte, read_stdin_as_vec_u8, ready_for_send,
+    slice_data, start_and_end, u16_to_u8_vec,
 };
+use v7::{error, info};
 
-// timeout: wenn enq/antwort darauf nicht ankommen
+// timeout: wenn enq/antw.len()ort darauf nicht ankommen
 // TODO: 1 Packet pro Transmission
 
 #[allow(dead_code)]
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
     ];
     // from file -> Transmission
-    // let data = read_stdin_as_vec_u8().unwrap();
+    let data = read_stdin_as_vec_u8().unwrap();
 
     let chunked = chunk_data(data, CHUNK_SIZE);
 
@@ -58,7 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     transmission_bins = ready_for_send(transmission_bins);
 
-    for _ in 0..1000 { // TODO: iwann entfernen oder weniger
+    for _ in 0..1000 {
+        // TODO: iwann entfernen oder weniger
         transmission_bins.insert(0, 0);
         transmission_bins.insert(0, 0b1000);
     }
@@ -72,7 +73,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ////////// main loop //////////
     let mut received: Vec<u8> = Vec::new();
-
 
     read_stdin_as_vec_u8().expect("dumm"); // TODO: zum Testen
 
@@ -135,25 +135,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &mut transmission_bins,
                     );
 
-                    eprintln!("Es müssen {}/{} neugesendet werden", false_ids.len(), transmission.header.total_packets);
+                    eprintln!(
+                        "Es müssen {}/{} neugesendet werden",
+                        false_ids.len(),
+                        transmission.header.total_packets
+                    );
 
                     pb.set_position(0);
                     pb.set_length(transmission_bins.len() as u64);
-                    
-                    if false_ids.is_empty() {
-                        // let result: Vec<u8> = transmission_packet_array.concat();
-                        //
-                        // let mut stdout = io::stdout();
-                        // error!("daten in .bin schreiben... ----------------------------");
-                        // stdout.write_all(&result)?;
-                        // stdout.flush()?;
 
+                    if false_ids.is_empty() {
                         pb.finish();
                     } else {
                         let chunked = chunk_data(u16_to_u8_vec(false_ids), CHUNK_SIZE);
                         let transmission = Transmission::new(make_transmission(chunked), true);
                         transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
-                        
+
+                        pb.set_position(0);
                         pb.set_length((transmission_bins.len() - 1) as u64);
                     }
                 }
@@ -241,6 +239,7 @@ fn receive_b15(drv: &mut B15F, clock: &mut u8) -> Result<u8, io::Error> {
 }
 
 ////////// other functions //////////
+#[allow(clippy::too_many_lines)]
 fn auswertung(
     data: Vec<u8>,
     start: usize,
@@ -295,20 +294,12 @@ fn auswertung(
         }
         // respond with data for requested packets
         let mut transmission_now = init_transmission.clone();
-        error!("{:?}", &transmission_now);
-        error!("{:?}", &ids);
-        // TODO: iwas mit den Packet ids komisch
-        // TODO:
-        // TODO:
-        for i in (0..transmission_now.packets.len()).rev() {
+        for i in (1..=transmission_now.packets.len()).rev() {
             assert!(i < u16::MAX as usize, "ID too large! (What did you do?)");
             if !ids.contains(&(i as u16)) {
-                let m = i + 1;
-                info!("Remove packet {m}");
-                transmission_now.packets.remove(i);
+                transmission_now.packets.retain(|x| x.header.id != i as u16);
             }
         }
-        error!("{:?}", &transmission_now);
         transmission_bins.extend(ready_for_send(transmission_now.clone().to_binary()));
     } else {
         for mut packet in transmission.packets {
@@ -342,22 +333,20 @@ fn auswertung(
     }
     let mut unrepairable_packets: Vec<u16> = Vec::new();
     let total_packets = transmission.header.total_packets;
-    for packet_id in 1..=total_packets { // 1 - da es kein packet mit id 0 gibt
-        dbg!(packet_id);
+    for packet_id in 1..=total_packets {
+        // 1 - da es kein packet mit id 0 gibt
         if transmission_packet_array[packet_id as usize] == Vec::new() {
             unrepairable_packets.push(packet_id);
         }
     }
-    // TODO: alle false ids aus transmissionpacketarray returnen
+
     if unrepairable_packets.is_empty() && !transmission.header.is_enquiry {
         let result: Vec<u8> = transmission_packet_array.concat();
         let mut stdout = io::stdout();
-        error!("daten in .bin schreiben... ----------------------------");
+        error!("daten in .bin schreiben...");
         stdout.write_all(&result).expect("write failed");
         stdout.flush().expect("flush failed");
     }
 
     unrepairable_packets
 }
-
-// -- -W clippy::pedantic
