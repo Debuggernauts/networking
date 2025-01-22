@@ -12,24 +12,24 @@ use serialport::{ClearBuffer, SerialPort};
 
 use v7::protocol::{ProtocolDecoder, State, Transmission};
 use v7::utilities::{
-    chunk_data, make_transmission, read_stdin_as_vec_u8, ready_for_send, slice_data, start_and_end,
-    u16_to_u8_vec,
+    chunk_data, make_transmission, print_colored_byte, read_stdin_as_vec_u8, ready_for_send,
+    slice_data, start_and_end, u16_to_u8_vec,
 };
 use v7::{error, info};
 
 // TODO: 1 Packet pro Transmission
 
 #[allow(dead_code)]
-const PORT_NAME: &str = "/dev/ttyUSB1";
+const PORT_NAME: &str = "/dev/ttyUSB0";
 #[allow(dead_code)]
 const BAUD_RATE: u32 = 115_200;
 const TIMEOUT: u128 = 2000;
 
 // Nano <-> Nano: 4ms
-// B15 <-> Nano: 20ms (15ms?)
-const CLK_DELAY: u128 = 15;
+// B15 <-> Nano: 29ms (15ms?)
+const CLK_DELAY: u128 = 4;
 
-const CHUNK_SIZE: usize = 16;
+const CHUNK_SIZE: usize = 48;
 
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,14 +44,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut port = setup_nano();
 
     ////////// data setup //////////
-    let data = vec![
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-    ];
+
+    // testing data for easier debugging
+    // let data = vec![
+    //     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    //     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    //     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    //     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    // ];
+
     // from file -> Transmission
-    // let data = read_stdin_as_vec_u8().unwrap();
+    let data = read_stdin_as_vec_u8().unwrap();
 
     let chunked = chunk_data(data, CHUNK_SIZE);
 
@@ -168,12 +171,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
                         state = State::WaitingForResponse;
                         pb.set_position(0);
-                        pb.set_length((transmission_bins.len() - 1) as u64);
+                        pb.set_length(transmission_bins.len() as u64);
                     }
                 }
-                pb.suspend(|| {
-                    //eprintln!("]");
-                });
+                // pb.suspend(|| {
+                //     eprintln!("]");
+                // });
             }
             Err(_e) => (),
         }
@@ -195,6 +198,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let chunked = chunk_data(u16_to_u8_vec(broken_ids.clone()), CHUNK_SIZE);
                 let transmission = Transmission::new(make_transmission(chunked), true);
                 transmission_bins.extend(ready_for_send(transmission.clone().to_binary()));
+                pb.set_position(0);
+                pb.set_length(transmission_bins.len() as u64);
             }
         }
     }
@@ -306,7 +311,7 @@ fn auswertung(
             let mut msg = header_vec.clone();
             msg.append(&mut packet.data.clone());
             msg.append(&mut packet.ecc.clone());
-            if msg.len() > 96 {
+            if msg.len() > 128 {
                 error!("Packet too long: {}", msg.len());
                 continue;
             }
@@ -354,7 +359,7 @@ fn auswertung(
             let mut msg = header_vec.clone();
             msg.append(&mut packet.data.clone());
             msg.append(&mut packet.ecc.clone());
-            if msg.len() > 96 {
+            if msg.len() > 128 {
                 error!("Packet too long: {}", msg.len());
                 continue;
             }
